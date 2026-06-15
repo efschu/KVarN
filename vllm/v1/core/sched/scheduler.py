@@ -2193,7 +2193,18 @@ class Scheduler(SchedulerInterface):
             # finished_recving_kv_req_ids is populated during
             # update_from_output(), based on worker-side connector signals
             # in KVConnectorOutput.finished_recving
-            if request.request_id not in self.finished_recving_kv_req_ids:
+            # Check if the load timed out — if so, treat as
+            # failed and fall back to recompute.
+            if self.connector is not None and hasattr(
+                self.connector, "get_timed_out_loads"
+            ):
+                timed_out = self.connector.get_timed_out_loads()  # type: ignore[attr-defined]
+                if request.request_id in timed_out:
+                    self.failed_recving_kv_req_ids.add(request.request_id)
+                    self.finished_recving_kv_req_ids.add(request.request_id)
+                else:
+                    return False
+            else:
                 return False
             self._update_waiting_for_remote_kv(request)
             if request.num_preemptions:

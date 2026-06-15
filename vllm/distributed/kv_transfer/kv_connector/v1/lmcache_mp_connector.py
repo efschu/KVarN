@@ -124,8 +124,6 @@ def create_scheduler_adapter(
         mla_enabled(vllm_config.model_config),
         world_size,
         kv_rank,
-        vllm_config.parallel_config.world_size,
-        vllm_config.parallel_config.rank,
         vllm_config.parallel_config.tensor_parallel_size,
         vllm_config.parallel_config.pipeline_parallel_size,
     )
@@ -157,8 +155,6 @@ def create_worker_adapter(
         mla_enabled(vllm_config.model_config),
         world_size,
         kv_rank,
-        vllm_config.parallel_config.world_size,
-        vllm_config.parallel_config.rank,
         vllm_config.parallel_config.tensor_parallel_size,
         vllm_config.parallel_config.pipeline_parallel_size,
     )

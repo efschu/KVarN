@@ -541,16 +541,26 @@ class LMCacheMPConnectorUpstream(KVConnectorBase_V1, SupportsHMA):
         assert self._connector_metadata is not None
         return self._connector_metadata
 
-    def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
+    def register_kv_caches(
+        self, kv_caches: dict[str, torch.Tensor | list[torch.Tensor]]
+    ):
         """
         Initialize with the KV caches. Useful for pre-registering the
         KV Caches in the KVConnector (e.g. for NIXL).
 
         Args:
-            kv_caches: dictionary of layer names, kv cache
+            kv_caches: dictionary of layer names, kv cache tensors or lists
         """
         logger.info("Registering kv caches!")
-        self.worker_adapter.register_kv_caches(kv_caches)
+        # Flatten list[tensor] values to dict[str, tensor] for LMCache
+        flat_kv_caches: dict[str, torch.Tensor] = {}
+        for name, cache in kv_caches.items():
+            if isinstance(cache, list):
+                # Quantized KV cache: use first tensor for device detection
+                flat_kv_caches[name] = cache[0]
+            else:
+                flat_kv_caches[name] = cache
+        self.worker_adapter.register_kv_caches(flat_kv_caches)
         return
 
     def start_load_kv(self, forward_context: "ForwardContext", **kwargs: Any) -> None:

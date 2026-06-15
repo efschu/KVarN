@@ -16,6 +16,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1,
     KVConnectorMetadata,
     KVConnectorRole,
+    SupportsHMA,
 )
 from vllm.v1.attention.backend import AttentionMetadata
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -461,7 +462,7 @@ class LMCacheMPConnectorMetadata(KVConnectorMetadata):
         return self.__str__()
 
 
-class LMCacheMPConnectorUpstream(KVConnectorBase_V1):
+class LMCacheMPConnectorUpstream(KVConnectorBase_V1, SupportsHMA):
     """
     The connector for LMCache multi-process mode.
 
@@ -956,6 +957,17 @@ class LMCacheMPConnectorUpstream(KVConnectorBase_V1):
         self.scheduler_adapter.end_session(request.request_id)
 
         return True, return_params
+
+    def request_finished_all_groups(
+        self,
+        request: "Request",
+        block_ids: tuple[list[int], ...],
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """
+        HMA variant of request_finished. Delegates to request_finished
+        using the first (and only) KV cache group's block IDs.
+        """
+        return self.request_finished(request, block_ids[0])
 
     def take_events(self) -> Iterable["KVCacheEvent"]:
         """

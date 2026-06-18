@@ -134,6 +134,7 @@ def create_scheduler_adapter(
         model_name=vllm_config.model_config.model,
         vllm_block_size=vllm_config.cache_config.block_size,
         parallel_strategy=parallel_strategy,
+        legacy_block_size=None,
         mq_timeout=mq_timeout,
         heartbeat_interval=heartbeat_interval,
     )
@@ -158,13 +159,13 @@ def create_worker_adapter(
         vllm_config.parallel_config.tensor_parallel_size,
         vllm_config.parallel_config.pipeline_parallel_size,
     )
-
     return LMCacheMPWorkerAdapter(
         server_url=server_url,
         context=zmq_context,
         model_name=vllm_config.model_config.model,
         vllm_block_size=vllm_config.cache_config.block_size,
         parallel_strategy=parallel_strategy,
+        legacy_block_size=None,
         mq_timeout=mq_timeout,
         heartbeat_interval=heartbeat_interval,
     )
@@ -496,6 +497,8 @@ class LMCacheMPConnectorUpstream(KVConnectorBase_V1, SupportsHMA):
             )
         )
 
+        if not server_host.startswith("tcp://"):
+            server_host = f"tcp://{server_host}"
         server_url = f"{server_host}:{server_port}"
         zmq_context = zmq.Context.instance()
         if self.role == KVConnectorRole.SCHEDULER:
@@ -647,9 +650,11 @@ class LMCacheMPConnectorUpstream(KVConnectorBase_V1, SupportsHMA):
         """
         # In MLA scenario, only the first rank of the pipeline group
         # needs to save the KV cache.
+        # Use getattr with defaults to handle adapters without these attrs
+        # (e.g., LMCACHE_USE_UPSTREAM_MP=1 with upstream worker adapter)
         if (
-            self.worker_adapter.use_mla
-            and not self.worker_adapter.is_first_rank_of_pp_group
+            getattr(self.worker_adapter, "use_mla", False)
+            and not getattr(self.worker_adapter, "is_first_rank_of_pp_group", True)
         ):
             return
 
@@ -971,7 +976,7 @@ class LMCacheMPConnectorUpstream(KVConnectorBase_V1, SupportsHMA):
     ) -> tuple[bool, dict[str, Any] | None]:
         """
         HMA variant of request_finished. Delegates to request_finished
-        using the first (and only) KV cache group's block IDs.
+        using the first (and only) KV cache groups block IDs.
         """
         return self.request_finished(request, block_ids[0])
 
@@ -1195,6 +1200,7 @@ class LMCacheMPConnectorUpstream(KVConnectorBase_V1, SupportsHMA):
             new_tracker = LMCacheMPRequestTracker(request)
             self.request_trackers[request_id] = new_tracker
         return self.request_trackers[request_id]
+
 
     def _cleanup_request_tracker(self, request_id: str) -> None:
         """

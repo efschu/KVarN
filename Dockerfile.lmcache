@@ -1,0 +1,53 @@
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
+
+# Python 3.12 required — LMCache 0.4.7 ships only cp312 wheels
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+# System deps: build tools, CUDA dev headers, Python 3.12, git, pip, libzmq
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl wget \
+        python3.12 python3.12-venv python3.12-dev \
+        libpython3.12-dev libzmq3-dev \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create venv so pip installs go into a clean environment
+RUN python3.12 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install PyTorch (CUDA 12.8) — must match what KVarN expects
+RUN pip install --no-cache-dir torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+
+# Install LMCache 0.4.7 (latest). Required by lmcache server (lmcache serve).
+# We use LMCACHE_USE_UPSTREAM_MP=1 to force the vllm-internal
+# LMCacheMPConnectorUpstream instead of LMCache 0.4.7's connector.
+# LMCache 0.4.7's connector tries to detect KV cache format from tensor
+# shapes, which fails for KVarN's 3D quantized format (num_blocks,
+# num_kv_heads, tile_bytes_aligned). The upstream connector uses
+# wrap_kv_caches() which converts tensors to CudaIPCWrapper without
+# format detection, and also inherits SupportsHMA for hybrid models.
+COPY ./kvarn_src /workspace/kvarn
+
+# Install KVarN (vLLM fork) in editable mode
+WORKDIR /workspace/kvarn
+RUN VLLM_USE_PRECOMPILED=1 pip install -e .
+
+# Clean up build artifacts to reduce image size
+RUN rm -rf /root/.cache/pip /tmp/*
+
+# Runtime env
+ENV VLLM_TARGET_DEVICE=cuda
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# Force vllm-internal LMCacheMPConnectorUpstream. LMCache 0.4.7's connector
+# crashes on KVarN's 3D quantized KV cache shape. Upstream connector uses
+# wrap_kv_caches() (no format detection) and inherits SupportsHMA.
+ENV LMCACHE_USE_UPSTREAM_MP=1
+
+WORKDIR /workspace/kvarn
+
+CMD ["vllm", "serve", "--help"]
